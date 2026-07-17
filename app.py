@@ -3,11 +3,22 @@ import cv2
 import numpy as np
 from PIL import Image
 import os
+import urllib.request
+
 st.set_page_config(page_title='Recortador SOMOS CLIP', page_icon='📸')
 st.title('📸 Recortador Automático SOMOS CLIP')
 st.write('Sube tus fotos y la IA las encuadrará en formato pasaporte (4:5).')
-detector = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+
+# Descarga directa del detector para evitar errores de ruta en el servidor
+xml_url = "https://raw.githubusercontent.com/opencv/opencv/master/data/haarcascades/haarcascade_frontalface_default.xml"
+xml_path = "haarcascade_frontalface_default.xml"
+
+if not os.path.exists(xml_path):
+    urllib.request.urlretrieve(xml_url, xml_path)
+
+detector = cv2.CascadeClassifier(xml_path)
 fotos = st.file_uploader('Sube tus imágenes...', type=['jpg', 'jpeg', 'png'], accept_multiple_files=True)
+
 if fotos:
     for foto in fotos:
         bytes_data = np.asarray(bytearray(foto.read()), dtype=np.uint8)
