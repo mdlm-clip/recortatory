@@ -1,9 +1,9 @@
 import streamlit as st
-import cv2
-import numpy as np
 from PIL import Image
+import numpy as np
 import os
 import mediapipe as mp
+import io
 
 st.set_page_config(page_title='Recortador SOMOS CLIP', page_icon='📸')
 st.title('📸 Recortador Automático SOMOS CLIP')
@@ -17,48 +17,71 @@ fotos = st.file_uploader('Sube tus imágenes...', type=['jpg', 'jpeg', 'png'], a
 
 if fotos:
     for foto in fotos:
-        bytes_data = np.asarray(bytearray(foto.read()), dtype=np.uint8)
-        img = cv2.imdecode(bytes_data, 1)
-        if img is None: continue
+        # Leer imagen usando PIL en lugar de OpenCV
+        try:
+            pil_img = Image.open(foto).convert("RGB")
+        except:
+            continue
+            
+        w_img, h_img = pil_img.size
+        img_np = np.array(pil_img)
         
-        h_img, w_img = img.shape[:2]
-        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        resultado = face_detection.process(img_rgb)
-        
+        # Procesar con MediaPipe
+        resultado = face_detection.process(img_np)
         recortado = False
+        crop_pil = None
         
         if resultado.detections:
-            # Tomamos el primer rostro detectado
             for detection in resultado.detections:
                 bbox = detection.location_data.relative_bounding_box
                 
-                # Convertir coordenadas relativas a píxeles reales
+                # Convertir coordenadas relativas a píxeles
                 x = int(bbox.xmin * w_img)
                 y = int(bbox.ymin * h_img)
                 w = int(bbox.width * w_img)
                 h = int(bbox.height * h_img)
                 
-                # Calcular márgenes simulando el comportamiento anterior
+                # Calcular márgenes del encuadre
                 y_in = max(0, int(y - h * 0.5))
                 y_fi = min(h_img, int(y + h * 2.0))
                 an_re = int((y_fi - y_in) * 4 / 5)
                 x_in = max(0, (x + w//2) - an_re//2)
                 
-                crop = img[y_in:y_fi, x_in:x_in+an_re]
-                recortado = True
-                break # Solo procesamos el primer plano
+                # Asegurar que el ancho no desborde la imagen original
+                x_fi = min(w_img, x_in + an_re)
                 
-        if not recortado:
-            # Recorte por defecto si no detecta rostro (Encuadre al centro vertical/horizontal 4:5)
+                # Recortar usando PIL
+                crop_pil = pil_img.crop((x_in, y_in, x_fi, y_fi))
+                recortado = True
+                break
+                
+        if not recortado or crop_pil is None:
+            # Recorte por defecto si no detecta rostro (Centro 4:5)
             y_in, y_fi = int(h_img * 0.1), int(h_img * 0.9)
             an_re = int((y_fi - y_in) * 4 / 5)
             x_in = max(0, (w_img // 2) - (an_re // 2))
-            crop = img[y_in:y_fi, x_in:x_in+an_re]
+            x_fi = min(w_img, x_in + an_re)
+            crop_pil = pil_img.crop((x_in, y_in, x_fi, y_fi))
             st.info(f"Encuadre estándar aplicado para: {foto.name}")
 
-        if crop.size > 0:
-            final = cv2.resize(crop, (540, 675))
-            final_rgb = cv2.cvtColor(final, cv2.COLOR_BGR2RGB)
-            st.image(final_rgb, caption=f'Listo: {foto.name}')
-            _, buffer = cv2.imencode(os.path.splitext(foto.name)[1], final)
-            st.download_button(label='⬇️ Descargar', data=buffer.tobytes(), file_name=f'recut_{foto.name}', key=foto.name)
+        if crop_pil:
+            # Redimensionar al tamaño final requerido
+            final_img = crop_pil.resize((540, 675), Image.Resampling.LANCZOS)
+            
+            # Mostrar previsualización en la web
+            st.image(final_img, caption=f'Listo: {foto.name}')
+            
+            # Preparar buffer para descarga sin guardar en disco
+            ext = os.path.splitext(foto.name)[1].lower()
+            formato = "JPEG" if ext in [".jpg", ".jpeg"] else "PNG"
+            
+            buffer = io.BytesIO()
+            final_img.save(buffer, format=formato)
+            bytes_data = buffer.getvalue()
+            
+            st.download_button(
+                label='⬇️ Descargar', 
+                data=bytes_data, 
+                file_name=f'recut_{foto.name}', 
+                key=foto.name
+            )
